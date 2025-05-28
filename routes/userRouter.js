@@ -12,7 +12,7 @@ const userRouter = express.Router();
 
 userRouter.post("/login", login);
 userRouter.post("/register", register);
-userRouter.post("/refresh-tokens", checkAuth, refreshTokens);
+userRouter.post("/refresh", checkAuth, refreshTokens);
 userRouter.get("/logout", checkAuth, logout);
 
 module.exports = userRouter;

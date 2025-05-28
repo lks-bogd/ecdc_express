@@ -1,62 +1,11 @@
-const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const { User, Role, RefreshToken } = require("../models");
 
-require("dotenv").config();
+const { User, Role, Teacher, Parent } = require("../models");
 
-const login = async (req, res) => {
+const create = async (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    const user = await User.findOne({
-      where: { email },
-      include: [{ model: RefreshToken, as: "refreshToken" }],
-    });
-    if (!user) {
-      return res.status(400).json({ error: "Неверный email или пароль" });
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
-    if (!isValidPassword) {
-      return res.status(400).json({ error: "Неверный email или пароль" });
-    }
-
-    const existingRefreshToken = await RefreshToken.findOne({
-      where: { userId: user.id },
-    });
-
-    const { accessToken, refreshToken } = genTokens(user);
-
-    if (existingRefreshToken) {
-      await existingRefreshToken.update({ value: refreshToken });
-    } else {
-      await RefreshToken.create({
-        value: refreshToken,
-        userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      });
-    }
-
-    res.cookie("refresh_token", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: "/",
-    });
-
-    res.status(200).json({ accessToken: accessToken });
-  } catch (e) {
-    console.log(`Произошла ошибка при попытке войти в систему: ${e}`);
-    return res.status(500).json({
-      error: "Произошла ошибка при попытке войти в систему. Попробуйте еще раз",
-    });
-  }
-};
-
-const register = async (req, res) => {
-  try {
-    const { email, password, role } = req.body;
+    const { email, role, firstName, middleName, lastName, dateOfBirth, phone } =
+      req.body;
 
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
@@ -68,6 +17,8 @@ const register = async (req, res) => {
       return res.status(404).json({ error: "Роли не существует" });
     }
 
+    const password = genPassword();
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await User.create({
       email,
@@ -75,133 +26,124 @@ const register = async (req, res) => {
       roleId: existingRole.id,
     });
 
-    const { accessToken, refreshToken } = genTokens(user);
+    if (existingRole.name === "parent") {
+      await Parent.create({
+        firstName,
+        middleName,
+        lastName,
+        dateOfBirth,
+        phone,
+        userId: user.id,
+      });
+    } else if (existingRole.name === "teacher") {
+      await Teacher.create({
+        firstName,
+        middleName,
+        lastName,
+        dateOfBirth,
+        phone,
+        userId: user.id,
+      });
+    }
 
-    await RefreshToken.create({
-      value: refreshToken,
-      userId: user.id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    res.status(201).json({
+      message: "Пользователь создан",
+      email: user.email,
+      password: password,
+      role: existingRole.name,
     });
-
-    res.cookie("refresh_token", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: "/",
-    });
-
-    res.status(201).json({ accessToken: accessToken });
   } catch (e) {
-    console.log(`Произошла ошибка при зарегистрироваться в системе: ${e}`);
+    console.log(`Произошла ошибка при добавлении пользователя: ${e}`);
+    return res.status(500).json({
+      error: "Произошла ошибка при добавлении пользователя. Попробуйте еще раз",
+    });
+  }
+};
+
+const update = async (req, res) => {
+  try {
+    const user = req.user;
+    const {
+      firstName,
+      middleName,
+      lastName,
+      dateOfBirth,
+      phone,
+      email,
+      password,
+      oldPassword,
+    } = req.body;
+
+    if (email && email !== user.email) {
+      const existingUser = await User.findOne({ where: { email } });
+      if (existingUser) {
+        return res.status(400).json({
+          error: "Адрес электронной почты уже занят",
+        });
+      }
+    }
+
+    if (password && !oldPassword) {
+      return res.status(400).json({
+        error: "Нужно указать старый пароль",
+      });
+    }
+
+    if (password && oldPassword) {
+      const isValidPassword = await bcrypt.compare(
+        oldPassword,
+        user.passwordHash
+      );
+      if (!isValidPassword) {
+        return res.status(400).json({
+          error: "Неверный старый пароль",
+        });
+      }
+    }
+
+    if (user.role.name === "parent") {
+      await Parent.update(
+        { firstName, middleName, lastName, dateOfBirth, phone },
+        { where: { userId: user.id } }
+      );
+    } else if (user.role.name === "teacher") {
+      await Teacher.update(
+        { firstName, middleName, lastName, dateOfBirth, phone },
+        { where: { userId: user.id } }
+      );
+    }
+
+    let updateData = {};
+    if (email) updateData.email = email;
+    if (password) updateData.passwordHash = await bcrypt.hash(password, 10);
+
+    if (Object.keys(updateData).length > 0) {
+      await User.update(updateData, { where: { id: user.id } });
+    }
+    res.status(200).json({ message: "Данные успешно обновлены" });
+  } catch (e) {
+    console.log(`Произошла ошибка при обновлении данных пользователя: ${e}`);
     return res.status(500).json({
       error:
-        "Произошла ошибка при зарегистрироваться в системе. Попробуйте еще раз",
+        "Произошла ошибка при обновлении данных пользователя. Попробуйте еще раз",
     });
   }
 };
 
-const refreshTokens = async (req, res) => {
-  try {
-    const oldRefreshToken = req.cookies.refresh_token;
-    if (!oldRefreshToken) {
-      return res
-        .status(401)
-        .json({ error: "Произошла ошибка: отсутствует токен обновления" });
-    }
+const genPassword = (minLength = 8, maxLength = 16) => {
+  const chars =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+  let password = "";
 
-    let decoded;
-    try {
-      decoded = jwt.verify(oldRefreshToken, process.env.JWT_SECRET);
-    } catch (e) {
-      return res
-        .status(401)
-        .json({ error: "Произошла ошибка: токен истек или поврежден" });
-    }
+  const length =
+    Math.floor(Math.random() * (maxLength - minLength + 1)) + minLength;
 
-    const user = await User.findByPk(decoded.id, {
-      include: [{ model: RefreshToken, as: "refreshToken" }],
-    });
-
-    if (
-      !user ||
-      !user.refreshToken ||
-      user.refreshToken.value !== oldRefreshToken
-    ) {
-      return res
-        .status(401)
-        .json({ error: "Произошла ошибка: токен истек или поврежден" });
-    }
-
-    const { accessToken, refresToken } = genTokens(user);
-
-    await user.refreshToken.update({
-      value: refresToken,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    });
-
-    res.cookie("refresh_token", refresToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: "/",
-    });
-
-    res.status(200).json({ accessToken: accessToken });
-  } catch (e) {
-    console.log(`Произошла ошибка при обновлении токенов: ${e}`);
-    return res.status(500).json({
-      error: "Произошла ошибка на сервере. Попробуйте еще раз",
-    });
+  for (let i = 0; i < length; i++) {
+    const randomIndex = Math.floor(Math.random() * chars.length);
+    password += chars[randomIndex];
   }
+
+  return password;
 };
 
-const logout = async (req, res) => {
-  try {
-    const refreshToken = req.cookies.refresh_token;
-
-    res.clearCookie("refresh_token", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/",
-    });
-
-    if (refreshToken) {
-      await RefreshToken.destroy({ where: { value: refreshToken } });
-    }
-
-    res.status(200).json({ message: "Выход выполнен успешно" });
-  } catch (e) {
-    console.error(`Произошла ошибка при выходе: ${e.message}`);
-    return res.status(500).json({
-      error: "Произошла ошибка на сервере. Попробуйте еще раз",
-    });
-  }
-};
-
-const genTokens = (user) => {
-  const payload = {
-    id: user.id,
-    email: user.email,
-    roleId: user.roleId,
-  };
-  try {
-    const accessToken = jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: "1m",
-    });
-    const refreshToken = jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
-
-    return { accessToken, refreshToken };
-  } catch (e) {
-    console.log(`Произошла ошибка при создании токенов: ${e}`);
-    return res.status(500).json({
-      error: "Произошла ошибка на сервере. Попробуйте еще раз",
-    });
-  }
-};
-
-module.exports = { register, login, logout, refreshTokens };
+module.exports = { create, update };

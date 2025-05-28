@@ -1,0 +1,52 @@
+# Секреты и окружение
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnp-*
+.cache/
+build/
+dist/
+
+# Логи
+logs/
+*.log
+*.log.*
+*.out
+*.pid
+*.seed
+*.pid.*
+
+# Тесты
+coverage/
+__tests__/
+test-results/
+
+# IDE / Редакторы
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.sublime-project
+*.sublime-workspace
+
+# Операционные системы
+.DS_Store
+Thumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.tmp
+*~*
+.lock
+.directory
